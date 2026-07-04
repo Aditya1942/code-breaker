@@ -65,7 +65,7 @@ export default function Home() {
     <main className="flex flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl">Code Breaker</CardTitle>
+          <CardTitle className="text-3xl tracking-tight">Code Breaker</CardTitle>
           <CardDescription>
             Enter a name to play. Add your email to keep your identity across
             devices, or leave it empty to play as a guest.
@@ -89,7 +89,7 @@ export default function Home() {
               value={joinKey}
               onChange={(e) => setJoinKey(e.target.value.toUpperCase())}
               maxLength={6}
-              className="font-mono uppercase"
+              className="font-mono uppercase tracking-widest"
             />
             <Button variant="secondary" onClick={joinGame} disabled={busy}>
               Join game

@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { KeyTiles } from "@/components/ui/key-tiles";
 import { IdentityForm, fetchMe, type Me } from "@/components/identity-form";
 import { useRoom } from "@/lib/use-room";
 
@@ -93,8 +94,8 @@ export default function RoomPage({
   return (
     <Shell
       title={
-        <span>
-          Room <span className="font-mono tracking-widest">{roomKey}</span>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          Room <KeyTiles value={roomKey} />
         </span>
       }
       description={
@@ -107,13 +108,13 @@ export default function RoomPage({
         {slots.map((p, i) => (
           <div
             key={p?.id ?? `empty-${i}`}
-            className="flex items-center gap-3 rounded-lg border p-3"
+            className="flex items-center gap-3 rounded-xl border-2 bg-card p-3 shadow-[3px_3px_0_var(--border)]"
           >
             {p ? (
               <>
                 <span
                   className={`size-2.5 rounded-full ${
-                    p.online ? "bg-green-500" : "bg-zinc-300 dark:bg-zinc-600"
+                    p.online ? "bg-primary animate-pulse" : "bg-muted-foreground/40"
                   }`}
                   title={p.online ? "Online" : "Offline"}
                 />
