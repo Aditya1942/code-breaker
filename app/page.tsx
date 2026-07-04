@@ -16,7 +16,6 @@ import { IdentityFields, fetchMe, login } from "@/components/identity-form";
 export default function Home() {
   const router = useRouter();
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [joinKey, setJoinKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,7 +34,7 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      await login(username, email);
+      await login(username);
       await action();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -67,17 +66,11 @@ export default function Home() {
         <CardHeader>
           <CardTitle className="text-3xl tracking-tight">Code Breaker</CardTitle>
           <CardDescription>
-            Enter a name to play. Add your email to keep your identity across
-            devices, or leave it empty to play as a guest.
+            Enter a name to play — no account needed.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <IdentityFields
-            username={username}
-            email={email}
-            onUsername={setUsername}
-            onEmail={setEmail}
-          />
+          <IdentityFields username={username} onUsername={setUsername} />
 
           <Button onClick={createGame} disabled={busy}>
             Create new game

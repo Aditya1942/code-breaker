@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getDb, findGame } from "@/lib/db";
+import { rooms } from "@/lib/store";
 import { getUser } from "@/lib/session";
 import { TURN_SECONDS_OPTIONS } from "@/lib/game";
 
@@ -18,8 +18,7 @@ export async function POST(
     return Response.json({ error: "Invalid timer" }, { status: 400 });
   }
 
-  const db = await getDb();
-  const room = findGame(db.data, key.toUpperCase());
+  const room = rooms.get(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -31,6 +30,5 @@ export async function POST(
   }
 
   room.turnSeconds = turnSeconds;
-  await db.write();
   return Response.json({ turnSeconds });
 }

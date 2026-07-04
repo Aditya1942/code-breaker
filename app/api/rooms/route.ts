@@ -1,4 +1,4 @@
-import { getDb, findGame, gameOwnerKey, type Game } from "@/lib/db";
+import { rooms, type Game } from "@/lib/store";
 import { getUser } from "@/lib/session";
 
 // No ambiguous chars (O/I/0/1)
@@ -18,11 +18,10 @@ export async function POST() {
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  const db = await getDb();
   // ponytail: retry on key collision instead of guaranteeing uniqueness upfront; 32^6 keyspace
   for (let i = 0; i < 5; i++) {
     const key = generateKey();
-    if (findGame(db.data, key)) continue;
+    if (rooms.has(key)) continue;
     const now = new Date().toISOString();
     const game: Game = {
       key,
@@ -32,11 +31,19 @@ export async function POST() {
       turnEndsAt: null,
       winnerUserId: null,
       createdAt: now,
-      members: [{ userId: user.id, secret: null, ready: false, joinedAt: now, lastSeenAt: now }],
+      members: [
+        {
+          userId: user.id,
+          username: user.username,
+          secret: null,
+          ready: false,
+          joinedAt: now,
+          lastSeenAt: now,
+        },
+      ],
       guesses: [],
     };
-    (db.data.games[gameOwnerKey(user)] ??= []).push(game);
-    await db.write();
+    rooms.set(key, game);
     return Response.json({ key });
   }
   return Response.json({ error: "Could not create room" }, { status: 500 });

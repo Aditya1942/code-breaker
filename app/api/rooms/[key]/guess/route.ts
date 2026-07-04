@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getDb, findGame } from "@/lib/db";
+import { rooms } from "@/lib/store";
 import { getUser } from "@/lib/session";
 import { isValidCode, score } from "@/lib/game";
 
@@ -21,8 +21,7 @@ export async function POST(
     );
   }
 
-  const db = await getDb();
-  const room = findGame(db.data, key.toUpperCase());
+  const room = rooms.get(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -63,7 +62,6 @@ export async function POST(
     isTimeout: false,
     createdAt: new Date().toISOString(),
   });
-  await db.write();
 
   return Response.json({ ...result, won });
 }

@@ -12,11 +12,11 @@ export async function fetchMe(): Promise<Me> {
   return res.ok ? res.json() : null;
 }
 
-export async function login(username: string, email: string): Promise<Me> {
+export async function login(username: string): Promise<Me> {
   const res = await fetch("/api/auth", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, email: email || undefined }),
+    body: JSON.stringify({ username }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Login failed");
@@ -25,37 +25,21 @@ export async function login(username: string, email: string): Promise<Me> {
 
 export function IdentityFields({
   username,
-  email,
   onUsername,
-  onEmail,
 }: {
   username: string;
-  email: string;
   onUsername: (v: string) => void;
-  onEmail: (v: string) => void;
 }) {
   return (
-    <>
-      <div className="grid gap-2">
-        <Label htmlFor="username">Username</Label>
-        <Input
-          id="username"
-          placeholder="Display name"
-          value={username}
-          onChange={(e) => onUsername(e.target.value)}
-        />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor="email">Email (optional — leave empty to play as guest)</Label>
-        <Input
-          id="email"
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => onEmail(e.target.value)}
-        />
-      </div>
-    </>
+    <div className="grid gap-2">
+      <Label htmlFor="username">Username</Label>
+      <Input
+        id="username"
+        placeholder="Display name"
+        value={username}
+        onChange={(e) => onUsername(e.target.value)}
+      />
+    </div>
   );
 }
 
@@ -67,7 +51,6 @@ export function IdentityForm({
   onDone: (me: Me) => void;
 }) {
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -75,7 +58,7 @@ export function IdentityForm({
     setBusy(true);
     setError(null);
     try {
-      onDone(await login(username, email));
+      onDone(await login(username));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
       setBusy(false);
@@ -90,12 +73,7 @@ export function IdentityForm({
         submit();
       }}
     >
-      <IdentityFields
-        username={username}
-        email={email}
-        onUsername={setUsername}
-        onEmail={setEmail}
-      />
+      <IdentityFields username={username} onUsername={setUsername} />
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={busy || !username.trim()}>
         {submitLabel}

@@ -1,17 +1,27 @@
 import { cookies } from "next/headers";
-import { getDb } from "@/lib/db";
 
 const COOKIE = "session";
 
-export async function getUser() {
-  const token = (await cookies()).get(COOKIE)?.value;
-  if (!token) return null;
-  const db = await getDb();
-  return db.data.users.find((u) => u.sessionToken === token) ?? null;
+export type SessionUser = { id: string; username: string };
+
+// Identity lives entirely in the cookie — no server-side user store.
+export async function getUser(): Promise<SessionUser | null> {
+  const raw = (await cookies()).get(COOKIE)?.value;
+  if (!raw) return null;
+  try {
+    const user = JSON.parse(Buffer.from(raw, "base64url").toString());
+    if (typeof user.id === "string" && typeof user.username === "string") {
+      return { id: user.id, username: user.username };
+    }
+  } catch {
+    // malformed cookie — treat as signed out
+  }
+  return null;
 }
 
-export async function setSessionCookie(token: string) {
-  (await cookies()).set(COOKIE, token, {
+export async function setSessionUser(user: SessionUser) {
+  const value = Buffer.from(JSON.stringify(user)).toString("base64url");
+  (await cookies()).set(COOKIE, value, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

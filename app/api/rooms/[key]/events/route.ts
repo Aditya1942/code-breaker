@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getDb, findGame, type Game } from "@/lib/db";
+import { rooms, type Game } from "@/lib/store";
 
 // Long-lived SSE stream; Vercel Fluid Compute keeps it open up to this limit,
 // EventSource auto-reconnects after.
@@ -11,7 +11,7 @@ const POLL_MS = 2_000;
 // Turn deadline passed → log a timeout entry and flip the turn. Mutation is
 // synchronous in-memory, so with two open streams only the first ticker past
 // the check writes; the second sees the new turnEndsAt and skips.
-async function sweepTimeout(db: Awaited<ReturnType<typeof getDb>>, room: Game) {
+function sweepTimeout(room: Game) {
   if (
     room.status !== "PLAYING" ||
     !room.currentTurnUserId ||
@@ -33,7 +33,6 @@ async function sweepTimeout(db: Awaited<ReturnType<typeof getDb>>, room: Game) {
     isTimeout: true,
     createdAt: new Date().toISOString(),
   });
-  await db.write();
 }
 
 export async function GET(
@@ -49,12 +48,9 @@ export async function GET(
       let lastPayload = "";
       let closed = false;
 
-      const tick = async () => {
-        const db = await getDb();
-        const room = findGame(db.data, roomKey);
-        if (room) await sweepTimeout(db, room);
-        const usernameOf = (userId: string) =>
-          db.data.users.find((u) => u.id === userId)?.username ?? "?";
+      const tick = () => {
+        const room = rooms.get(roomKey);
+        if (room) sweepTimeout(room);
         const state = room
           ? {
               key: room.key,
@@ -66,18 +62,11 @@ export async function GET(
               winnerUserId: room.winnerUserId,
               players: room.members.map((m) => ({
                 id: m.userId,
-                username: usernameOf(m.userId),
+                username: m.username,
                 online: Date.now() - Date.parse(m.lastSeenAt) < ONLINE_WINDOW_MS,
                 ready: m.ready,
               })),
-              guesses: room.guesses.map((g) => ({
-                userId: g.userId,
-                value: g.value,
-                digits: g.digits,
-                placed: g.placed,
-                isTimeout: g.isTimeout,
-                createdAt: g.createdAt,
-              })),
+              guesses: room.guesses,
               // secrets stay server-side until the game ends
               secrets:
                 room.status === "FINISHED"
@@ -94,8 +83,8 @@ export async function GET(
         }
       };
 
-      const interval = setInterval(() => tick().catch(() => {}), POLL_MS);
-      tick().catch(() => {});
+      const interval = setInterval(tick, POLL_MS);
+      tick();
 
       req.signal.addEventListener("abort", () => {
         closed = true;

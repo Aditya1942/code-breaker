@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getDb, findGame } from "@/lib/db";
+import { rooms } from "@/lib/store";
 import { getUser } from "@/lib/session";
 
 export async function POST(
@@ -12,12 +12,11 @@ export async function POST(
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  const db = await getDb();
-  const room = findGame(db.data, key.toUpperCase());
-  const me = room?.members.find((m) => m.userId === user.id);
+  const me = rooms
+    .get(key.toUpperCase())
+    ?.members.find((m) => m.userId === user.id);
   if (me) {
     me.lastSeenAt = new Date().toISOString();
-    await db.write();
   }
 
   return Response.json({ ok: true });
