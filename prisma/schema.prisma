@@ -17,21 +17,49 @@ model User {
   memberships  RoomMember[]
 }
 
+enum RoomStatus {
+  LOBBY
+  PLAYING
+  FINISHED
+}
+
 model Room {
-  id        String       @id @default(cuid())
-  key       String       @unique // 6 chars, A-Z + 2-9, no O/I/0/1
-  createdAt DateTime     @default(now())
-  members   RoomMember[]
+  id                String       @id @default(cuid())
+  key               String       @unique // 6 chars, A-Z + 2-9, no O/I/0/1
+  status            RoomStatus   @default(LOBBY)
+  turnSeconds       Int          @default(60)
+  currentTurnUserId String?
+  turnEndsAt        DateTime?
+  winnerUserId      String?
+  createdAt         DateTime     @default(now())
+  members           RoomMember[]
+  guesses           Guess[]
 }
 
 model RoomMember {
   id         String   @id @default(cuid())
   roomId     String
   userId     String
+  secret     String? // 4-digit code as string — never an int (leading zeros)
+  ready      Boolean  @default(false)
   joinedAt   DateTime @default(now())
   lastSeenAt DateTime @default(now())
   room       Room     @relation(fields: [roomId], references: [id])
   user       User     @relation(fields: [userId], references: [id])
 
   @@unique([roomId, userId])
+}
+
+model Guess {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  value     String // "" for timeout entries
+  digits    Int
+  placed    Int
+  isTimeout Boolean  @default(false)
+  createdAt DateTime @default(now())
+  room      Room     @relation(fields: [roomId], references: [id])
+
+  @@index([roomId, createdAt])
 }
