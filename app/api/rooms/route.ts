@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb, findGame, gameOwnerKey, type Game } from "@/lib/db";
 import { getUser } from "@/lib/session";
 
 // No ambiguous chars (O/I/0/1)
@@ -18,16 +18,26 @@ export async function POST() {
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
+  const db = await getDb();
   // ponytail: retry on key collision instead of guaranteeing uniqueness upfront; 32^6 keyspace
   for (let i = 0; i < 5; i++) {
-    try {
-      const room = await prisma.room.create({
-        data: { key: generateKey(), members: { create: { userId: user.id } } },
-      });
-      return Response.json({ key: room.key });
-    } catch {
-      // unique constraint hit, retry with new key
-    }
+    const key = generateKey();
+    if (findGame(db.data, key)) continue;
+    const now = new Date().toISOString();
+    const game: Game = {
+      key,
+      status: "LOBBY",
+      turnSeconds: 60,
+      currentTurnUserId: null,
+      turnEndsAt: null,
+      winnerUserId: null,
+      createdAt: now,
+      members: [{ userId: user.id, secret: null, ready: false, joinedAt: now, lastSeenAt: now }],
+      guesses: [],
+    };
+    (db.data.games[gameOwnerKey(user)] ??= []).push(game);
+    await db.write();
+    return Response.json({ key });
   }
   return Response.json({ error: "Could not create room" }, { status: 500 });
 }

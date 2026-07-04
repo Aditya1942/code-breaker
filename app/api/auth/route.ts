@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, type User } from "@/lib/db";
 import { getUser, setSessionCookie } from "@/lib/session";
 
 export async function GET() {
@@ -23,13 +23,22 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid email" }, { status: 400 });
   }
 
-  const user = email
-    ? await prisma.user.upsert({
-        where: { email },
-        update: { username },
-        create: { email, username },
-      })
-    : await prisma.user.create({ data: { username, isGuest: true } });
+  const db = await getDb();
+  let user = email ? db.data.users.find((u) => u.email === email) : undefined;
+  if (user) {
+    user.username = username;
+  } else {
+    user = {
+      id: crypto.randomUUID(),
+      email: email || null,
+      username,
+      isGuest: !email,
+      sessionToken: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    } satisfies User;
+    db.data.users.push(user);
+  }
+  await db.write();
 
   await setSessionCookie(user.sessionToken);
   return Response.json({ id: user.id, username: user.username });

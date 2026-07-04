@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, findGame, type Game } from "@/lib/db";
 
 // Long-lived SSE stream; Vercel Fluid Compute keeps it open up to this limit,
 // EventSource auto-reconnects after.
@@ -8,46 +8,32 @@ export const maxDuration = 300;
 const ONLINE_WINDOW_MS = 25_000;
 const POLL_MS = 2_000;
 
-// Turn deadline passed → log a timeout entry and flip the turn. Optimistic
-// updateMany guard: with two open streams only one writer wins, so the
-// timeout Guess row is inserted exactly once.
-async function sweepTimeout(room: {
-  id: string;
-  status: string;
-  currentTurnUserId: string | null;
-  turnEndsAt: Date | null;
-  turnSeconds: number;
-  members: { userId: string }[];
-}) {
+// Turn deadline passed → log a timeout entry and flip the turn. Mutation is
+// synchronous in-memory, so with two open streams only the first ticker past
+// the check writes; the second sees the new turnEndsAt and skips.
+async function sweepTimeout(db: Awaited<ReturnType<typeof getDb>>, room: Game) {
   if (
     room.status !== "PLAYING" ||
     !room.currentTurnUserId ||
     !room.turnEndsAt ||
-    room.turnEndsAt.getTime() > Date.now()
+    Date.parse(room.turnEndsAt) > Date.now()
   ) {
     return;
   }
   const next = room.members.find((m) => m.userId !== room.currentTurnUserId);
   if (!next) return;
-  const claimed = await prisma.room.updateMany({
-    where: { id: room.id, status: "PLAYING", turnEndsAt: room.turnEndsAt },
-    data: {
-      currentTurnUserId: next.userId,
-      turnEndsAt: new Date(Date.now() + room.turnSeconds * 1000),
-    },
+  const timedOutUserId = room.currentTurnUserId;
+  room.currentTurnUserId = next.userId;
+  room.turnEndsAt = new Date(Date.now() + room.turnSeconds * 1000).toISOString();
+  room.guesses.push({
+    userId: timedOutUserId,
+    value: "",
+    digits: 0,
+    placed: 0,
+    isTimeout: true,
+    createdAt: new Date().toISOString(),
   });
-  if (claimed.count > 0) {
-    await prisma.guess.create({
-      data: {
-        roomId: room.id,
-        userId: room.currentTurnUserId,
-        value: "",
-        digits: 0,
-        placed: 0,
-        isTimeout: true,
-      },
-    });
-  }
+  await db.write();
 }
 
 export async function GET(
@@ -64,17 +50,11 @@ export async function GET(
       let closed = false;
 
       const tick = async () => {
-        const room = await prisma.room.findUnique({
-          where: { key: roomKey },
-          include: {
-            members: {
-              include: { user: true },
-              orderBy: { joinedAt: "asc" },
-            },
-            guesses: { orderBy: { createdAt: "asc" } },
-          },
-        });
-        if (room) await sweepTimeout(room);
+        const db = await getDb();
+        const room = findGame(db.data, roomKey);
+        if (room) await sweepTimeout(db, room);
+        const usernameOf = (userId: string) =>
+          db.data.users.find((u) => u.id === userId)?.username ?? "?";
         const state = room
           ? {
               key: room.key,
@@ -82,12 +62,12 @@ export async function GET(
               hostId: room.members[0]?.userId ?? null,
               turnSeconds: room.turnSeconds,
               currentTurnUserId: room.currentTurnUserId,
-              turnEndsAt: room.turnEndsAt?.toISOString() ?? null,
+              turnEndsAt: room.turnEndsAt,
               winnerUserId: room.winnerUserId,
               players: room.members.map((m) => ({
                 id: m.userId,
-                username: m.user.username,
-                online: Date.now() - m.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
+                username: usernameOf(m.userId),
+                online: Date.now() - Date.parse(m.lastSeenAt) < ONLINE_WINDOW_MS,
                 ready: m.ready,
               })),
               guesses: room.guesses.map((g) => ({
@@ -96,7 +76,7 @@ export async function GET(
                 digits: g.digits,
                 placed: g.placed,
                 isTimeout: g.isTimeout,
-                createdAt: g.createdAt.toISOString(),
+                createdAt: g.createdAt,
               })),
               // secrets stay server-side until the game ends
               secrets:

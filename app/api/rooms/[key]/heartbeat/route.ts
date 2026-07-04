@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, findGame } from "@/lib/db";
 import { getUser } from "@/lib/session";
 
 export async function POST(
@@ -12,10 +12,13 @@ export async function POST(
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  await prisma.roomMember.updateMany({
-    where: { userId: user.id, room: { key: key.toUpperCase() } },
-    data: { lastSeenAt: new Date() },
-  });
+  const db = await getDb();
+  const room = findGame(db.data, key.toUpperCase());
+  const me = room?.members.find((m) => m.userId === user.id);
+  if (me) {
+    me.lastSeenAt = new Date().toISOString();
+    await db.write();
+  }
 
   return Response.json({ ok: true });
 }

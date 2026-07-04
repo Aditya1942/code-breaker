@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, findGame } from "@/lib/db";
 import { getUser } from "@/lib/session";
 import { TURN_SECONDS_OPTIONS } from "@/lib/game";
 
@@ -18,10 +18,8 @@ export async function POST(
     return Response.json({ error: "Invalid timer" }, { status: 400 });
   }
 
-  const room = await prisma.room.findUnique({
-    where: { key: key.toUpperCase() },
-    include: { members: { orderBy: { joinedAt: "asc" } } },
-  });
+  const db = await getDb();
+  const room = findGame(db.data, key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -32,6 +30,7 @@ export async function POST(
     return Response.json({ error: "Only the host can set the timer" }, { status: 403 });
   }
 
-  await prisma.room.update({ where: { id: room.id }, data: { turnSeconds } });
+  room.turnSeconds = turnSeconds;
+  await db.write();
   return Response.json({ turnSeconds });
 }

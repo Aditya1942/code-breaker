@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, findGame } from "@/lib/db";
 import { getUser } from "@/lib/session";
 
 export async function POST(
@@ -12,10 +12,8 @@ export async function POST(
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  const room = await prisma.room.findUnique({
-    where: { key: key.toUpperCase() },
-    include: { members: true },
-  });
+  const db = await getDb();
+  const room = findGame(db.data, key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -25,8 +23,9 @@ export async function POST(
     return Response.json({ error: "Room is full" }, { status: 403 });
   }
   if (!isMember) {
-    // ponytail: concurrent joins could briefly seat 3 players; add a tx count check if it ever matters
-    await prisma.roomMember.create({ data: { roomId: room.id, userId: user.id } });
+    const now = new Date().toISOString();
+    room.members.push({ userId: user.id, secret: null, ready: false, joinedAt: now, lastSeenAt: now });
+    await db.write();
   }
 
   return Response.json({ key: room.key });

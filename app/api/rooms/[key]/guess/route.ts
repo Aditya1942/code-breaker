@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb, findGame } from "@/lib/db";
 import { getUser } from "@/lib/session";
 import { isValidCode, score } from "@/lib/game";
 
@@ -21,10 +21,8 @@ export async function POST(
     );
   }
 
-  const room = await prisma.room.findUnique({
-    where: { key: key.toUpperCase() },
-    include: { members: true },
-  });
+  const db = await getDb();
+  const room = findGame(db.data, key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -34,7 +32,7 @@ export async function POST(
   if (room.currentTurnUserId !== user.id) {
     return Response.json({ error: "Not your turn" }, { status: 403 });
   }
-  if (room.turnEndsAt && room.turnEndsAt.getTime() <= Date.now()) {
+  if (room.turnEndsAt && Date.parse(room.turnEndsAt) <= Date.now()) {
     // deadline passed — the SSE sweep will log the timeout and flip the turn
     return Response.json({ error: "Time is up for this turn" }, { status: 409 });
   }
@@ -47,26 +45,25 @@ export async function POST(
   const result = score(opponent.secret, guess);
   const won = result.placed === 4;
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      // guard on turn ownership so a double-submit can't score twice
-      const claimed = await tx.room.updateMany({
-        where: { id: room.id, status: "PLAYING", currentTurnUserId: user.id },
-        data: won
-          ? { status: "FINISHED", winnerUserId: user.id, currentTurnUserId: null, turnEndsAt: null }
-          : {
-              currentTurnUserId: opponent.userId,
-              turnEndsAt: new Date(Date.now() + room.turnSeconds * 1000),
-            },
-      });
-      if (claimed.count === 0) throw new Error("turn lost");
-      await tx.guess.create({
-        data: { roomId: room.id, userId: user.id, value: guess, ...result },
-      });
-    });
-  } catch {
-    return Response.json({ error: "Turn already resolved" }, { status: 409 });
+  // turn ownership checked above; mutations are synchronous so a double-submit
+  // sees the flipped turn and 403s before reaching here
+  if (won) {
+    room.status = "FINISHED";
+    room.winnerUserId = user.id;
+    room.currentTurnUserId = null;
+    room.turnEndsAt = null;
+  } else {
+    room.currentTurnUserId = opponent.userId;
+    room.turnEndsAt = new Date(Date.now() + room.turnSeconds * 1000).toISOString();
   }
+  room.guesses.push({
+    userId: user.id,
+    value: guess,
+    ...result,
+    isTimeout: false,
+    createdAt: new Date().toISOString(),
+  });
+  await db.write();
 
   return Response.json({ ...result, won });
 }
