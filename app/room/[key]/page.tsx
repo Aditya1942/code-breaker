@@ -285,6 +285,7 @@ function GameScreen({
 }) {
   const [guess, setGuess] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showSecret, setShowSecret] = useState(true);
 
   const opponent = state.players.find((p) => p.id !== me.id);
   const myTurn = state.currentTurnUserId === me.id;
@@ -293,6 +294,7 @@ function GameScreen({
 
   const myGuesses = state.guesses.filter((g) => g.userId === me.id);
   const theirGuesses = state.guesses.filter((g) => g.userId !== me.id);
+  const mySecret = state.secrets?.[me.id];
 
   const submit = async () => {
     if (!isValidCode(guess)) {
@@ -327,6 +329,21 @@ function GameScreen({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5">
+          {!finished && mySecret && (
+            <div className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-card p-2 text-sm text-muted-foreground shadow-[2px_2px_0_var(--border)]">
+              Your secret code{" "}
+              <KeyTiles value={showSecret ? mySecret : "••••"} />
+              <button
+                type="button"
+                onClick={() => setShowSecret((v) => !v)}
+                aria-label={showSecret ? "Hide your secret code" : "Show your secret code"}
+                aria-pressed={showSecret}
+                className="ml-1 rounded-md p-1 text-muted-foreground hover:text-foreground"
+              >
+                <EyeIcon off={!showSecret} />
+              </button>
+            </div>
+          )}
           {finished ? (
             <div className="grid gap-3 rounded-xl border-2 bg-card p-4 text-center shadow-[3px_3px_0_var(--border)]">
               <p className="font-display text-2xl font-extrabold">
@@ -507,6 +524,26 @@ function Countdown({
         {seconds}s
       </p>
     </div>
+  );
+}
+
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+      {off && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
   );
 }
 

@@ -48,3 +48,11 @@ export async function getRoom(key: string): Promise<Game | undefined> {
 export async function saveRoom(game: Game): Promise<void> {
   await cache.set(game.key, game, { ttl: ROOM_TTL_SECONDS });
 }
+
+export async function deleteRoom(key: string): Promise<void> {
+  await cache.delete(key);
+}
+
+// Both players idling: too many timeout guesses means nobody's playing —
+// destroy the room instead of leaving a zombie until TTL.
+export const MAX_TIMEOUTS = 20;

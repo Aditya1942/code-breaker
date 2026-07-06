@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { getRoom, saveRoom, type Game } from "@/lib/store";
+import { getRoom, saveRoom, deleteRoom, MAX_TIMEOUTS, type Game } from "@/lib/store";
+import { getUser } from "@/lib/session";
 
 // Long-lived SSE stream; Vercel Fluid Compute keeps it open up to this limit,
 // EventSource auto-reconnects after.
@@ -44,6 +45,7 @@ export async function GET(
   const { key } = await params;
   const roomKey = key.toUpperCase();
   const encoder = new TextEncoder();
+  const user = await getUser(); // per-connection identity — reveals only own secret
 
   const stream = new ReadableStream({
     start(controller) {
@@ -53,6 +55,14 @@ export async function GET(
       const tick = async () => {
         const room = await getRoom(roomKey);
         if (room && sweepTimeout(room)) await saveRoom(room);
+        // Both players idling — nobody's guessing. Kill the zombie room.
+        if (room && room.guesses.filter((g) => g.isTimeout).length >= MAX_TIMEOUTS) {
+          await deleteRoom(roomKey);
+          if (!closed) {
+            controller.enqueue(encoder.encode(`data: null\n\n`));
+          }
+          return;
+        }
         const state = room
           ? {
               key: room.key,
@@ -69,13 +79,19 @@ export async function GET(
                 ready: m.ready,
               })),
               guesses: room.guesses,
-              // secrets stay server-side until the game ends
+              // Own secret always visible; opponent's only after the game ends.
               secrets:
                 room.status === "FINISHED"
                   ? Object.fromEntries(
                       room.members.map((m) => [m.userId, m.secret ?? ""])
                     )
-                  : undefined,
+                  : user
+                    ? Object.fromEntries(
+                        room.members
+                          .filter((m) => m.userId === user.id)
+                          .map((m) => [m.userId, m.secret ?? ""])
+                      )
+                    : undefined,
             }
           : null;
         const payload = JSON.stringify(state);
