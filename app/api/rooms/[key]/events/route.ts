@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rooms, type Game } from "@/lib/store";
+import { getRoom, saveRoom, type Game } from "@/lib/store";
 
 // Long-lived SSE stream; Vercel Fluid Compute keeps it open up to this limit,
 // EventSource auto-reconnects after.
@@ -8,20 +8,21 @@ export const maxDuration = 300;
 const ONLINE_WINDOW_MS = 25_000;
 const POLL_MS = 2_000;
 
-// Turn deadline passed → log a timeout entry and flip the turn. Mutation is
-// synchronous in-memory, so with two open streams only the first ticker past
-// the check writes; the second sees the new turnEndsAt and skips.
-function sweepTimeout(room: Game) {
+// Turn deadline passed → log a timeout entry and flip the turn. Returns true
+// when it mutated the room so the caller knows to save.
+// ponytail: two open streams can both sweep the same deadline and write twice;
+// worst case is a duplicate timeout row. Atomic ops need a real store.
+function sweepTimeout(room: Game): boolean {
   if (
     room.status !== "PLAYING" ||
     !room.currentTurnUserId ||
     !room.turnEndsAt ||
     Date.parse(room.turnEndsAt) > Date.now()
   ) {
-    return;
+    return false;
   }
   const next = room.members.find((m) => m.userId !== room.currentTurnUserId);
-  if (!next) return;
+  if (!next) return false;
   const timedOutUserId = room.currentTurnUserId;
   room.currentTurnUserId = next.userId;
   room.turnEndsAt = new Date(Date.now() + room.turnSeconds * 1000).toISOString();
@@ -33,6 +34,7 @@ function sweepTimeout(room: Game) {
     isTimeout: true,
     createdAt: new Date().toISOString(),
   });
+  return true;
 }
 
 export async function GET(
@@ -48,9 +50,9 @@ export async function GET(
       let lastPayload = "";
       let closed = false;
 
-      const tick = () => {
-        const room = rooms.get(roomKey);
-        if (room) sweepTimeout(room);
+      const tick = async () => {
+        const room = await getRoom(roomKey);
+        if (room && sweepTimeout(room)) await saveRoom(room);
         const state = room
           ? {
               key: room.key,

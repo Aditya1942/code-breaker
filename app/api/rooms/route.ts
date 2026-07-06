@@ -1,4 +1,4 @@
-import { rooms, type Game } from "@/lib/store";
+import { getRoom, saveRoom, type Game } from "@/lib/store";
 import { getUser } from "@/lib/session";
 
 // No ambiguous chars (O/I/0/1)
@@ -21,7 +21,7 @@ export async function POST() {
   // ponytail: retry on key collision instead of guaranteeing uniqueness upfront; 32^6 keyspace
   for (let i = 0; i < 5; i++) {
     const key = generateKey();
-    if (rooms.has(key)) continue;
+    if (await getRoom(key)) continue;
     const now = new Date().toISOString();
     const game: Game = {
       key,
@@ -43,7 +43,7 @@ export async function POST() {
       ],
       guesses: [],
     };
-    rooms.set(key, game);
+    await saveRoom(game);
     return Response.json({ key });
   }
   return Response.json({ error: "Could not create room" }, { status: 500 });

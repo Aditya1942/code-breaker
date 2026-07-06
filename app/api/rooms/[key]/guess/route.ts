@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rooms } from "@/lib/store";
+import { getRoom, saveRoom } from "@/lib/store";
 import { getUser } from "@/lib/session";
 import { isValidCode, score } from "@/lib/game";
 
@@ -21,7 +21,7 @@ export async function POST(
     );
   }
 
-  const room = rooms.get(key.toUpperCase());
+  const room = await getRoom(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -44,8 +44,8 @@ export async function POST(
   const result = score(opponent.secret, guess);
   const won = result.placed === 4;
 
-  // turn ownership checked above; mutations are synchronous so a double-submit
-  // sees the flipped turn and 403s before reaching here
+  // turn ownership checked above; a double-submit re-reads the flipped turn
+  // from the cache and 403s before reaching here
   if (won) {
     room.status = "FINISHED";
     room.winnerUserId = user.id;
@@ -62,6 +62,7 @@ export async function POST(
     isTimeout: false,
     createdAt: new Date().toISOString(),
   });
+  await saveRoom(room);
 
   return Response.json({ ...result, won });
 }

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rooms } from "@/lib/store";
+import { getRoom, saveRoom } from "@/lib/store";
 import { getUser } from "@/lib/session";
 import { isValidCode } from "@/lib/game";
 
@@ -21,7 +21,7 @@ export async function POST(
     );
   }
 
-  const room = rooms.get(key.toUpperCase());
+  const room = await getRoom(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -36,7 +36,6 @@ export async function POST(
     return Response.json({ error: "Waiting for a second player" }, { status: 409 });
   }
 
-  // mutations are synchronous in-memory, so two ready calls can't interleave here
   me.secret = secret;
   me.ready = true;
   if (room.members.every((m) => m.ready)) {
@@ -45,6 +44,7 @@ export async function POST(
     room.currentTurnUserId = first.userId;
     room.turnEndsAt = new Date(Date.now() + room.turnSeconds * 1000).toISOString();
   }
+  await saveRoom(room);
 
   return Response.json({ ready: true });
 }

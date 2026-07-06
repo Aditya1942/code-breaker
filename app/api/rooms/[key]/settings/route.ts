@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rooms } from "@/lib/store";
+import { getRoom, saveRoom } from "@/lib/store";
 import { getUser } from "@/lib/session";
 import { TURN_SECONDS_OPTIONS } from "@/lib/game";
 
@@ -18,7 +18,7 @@ export async function POST(
     return Response.json({ error: "Invalid timer" }, { status: 400 });
   }
 
-  const room = rooms.get(key.toUpperCase());
+  const room = await getRoom(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -30,5 +30,6 @@ export async function POST(
   }
 
   room.turnSeconds = turnSeconds;
+  await saveRoom(room);
   return Response.json({ turnSeconds });
 }

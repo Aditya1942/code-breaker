@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rooms } from "@/lib/store";
+import { getRoom, saveRoom } from "@/lib/store";
 import { getUser } from "@/lib/session";
 
 export async function POST(
@@ -12,7 +12,7 @@ export async function POST(
     return Response.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  const room = rooms.get(key.toUpperCase());
+  const room = await getRoom(key.toUpperCase());
   if (!room) {
     return Response.json({ error: "Room not found" }, { status: 404 });
   }
@@ -31,6 +31,7 @@ export async function POST(
       joinedAt: now,
       lastSeenAt: now,
     });
+    await saveRoom(room);
   }
 
   return Response.json({ key: room.key });
