@@ -1,0 +1,247 @@
+rules_version = '2';
+
+// Threat model: honest-but-curious players. Hard guarantees: the opponent's
+// secret is unreadable before FINISHED, secrets are immutable during play,
+// no out-of-turn guesses, no timeouts forged before the deadline, no
+// self-declared wins without a scored 4-placed guess. Accepted gaps
+// (documented in the plan): a malicious scorer can lie about digits/placed
+// or stall; the second-ready client picks the first turn.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+
+    match /rooms/{key} {
+      function room() { return resource.data; }
+      function after() { return request.resource.data; }
+      function isMember() { return request.auth.uid in room().memberUids; }
+      function otherThan(id) {
+        return room().memberUids[0] == id
+          ? room().memberUids[1]
+          : room().memberUids[0];
+      }
+      function changed() { return after().diff(room()).affectedKeys(); }
+      function myEntryOnly() {
+        return after().members.diff(room().members).affectedKeys()
+          .hasOnly([request.auth.uid]);
+      }
+      // Deadline the client just wrote must be ~turnSeconds from now
+      // (5s tolerance for clock skew and rules latency).
+      function validDeadline() {
+        return after().turnEndsAt > request.time
+          && after().turnEndsAt
+             <= request.time + duration.value(after().turnSeconds + 5, 's');
+      }
+
+      // Room key is the capability — anyone signed in who knows it may watch.
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && key.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && after().status == 'LOBBY'
+        && after().hostUid == request.auth.uid
+        && after().memberUids == [request.auth.uid]
+        && after().members.keys().hasOnly([request.auth.uid])
+        && after().members[request.auth.uid].username is string
+        && after().members[request.auth.uid].username.size() > 0
+        && after().members[request.auth.uid].username.size() <= 40
+        && after().members[request.auth.uid].ready == false
+        && after().turnSeconds in [30, 60, 90, 120]
+        && after().guessCount == 0
+        && after().timeoutCount == 0
+        && after().currentTurnUid == null
+        && after().turnEndsAt == null
+        && after().winnerUid == null
+        && after().winningGuessId == null
+        && after().revealedSecrets == {};
+
+      // Zombie rooms only — 20 accumulated timeouts.
+      allow delete: if signedIn() && isMember() && room().timeoutCount >= 20;
+
+      allow update: if signedIn() && (
+        isJoin() || isHeartbeat() || isSettings() || isReady()
+        || isGuessFlip() || isTimeoutFlip() || isFinish() || isReveal());
+
+      function isJoin() {
+        return room().status == 'LOBBY'
+          && !(request.auth.uid in room().memberUids)
+          && room().memberUids.size() < 2
+          && changed().hasOnly(['memberUids', 'members'])
+          && after().memberUids.size() == 2
+          && after().memberUids[0] == room().memberUids[0]
+          && after().memberUids[1] == request.auth.uid
+          && myEntryOnly()
+          && after().members[request.auth.uid].username is string
+          && after().members[request.auth.uid].username.size() > 0
+          && after().members[request.auth.uid].username.size() <= 40
+          && after().members[request.auth.uid].ready == false;
+      }
+
+      function isHeartbeat() {
+        return isMember()
+          && changed().hasOnly(['members'])
+          && myEntryOnly()
+          && after().members[request.auth.uid]
+             .diff(room().members[request.auth.uid])
+             .affectedKeys().hasOnly(['lastSeenAt']);
+      }
+
+      function isSettings() {
+        return request.auth.uid == room().hostUid
+          && room().status == 'LOBBY'
+          && changed().hasOnly(['turnSeconds'])
+          && after().turnSeconds in [30, 60, 90, 120];
+      }
+
+      function isReady() {
+        return isMember()
+          && room().status == 'LOBBY'
+          && room().memberUids.size() == 2
+          && myEntryOnly()
+          && after().members[request.auth.uid]
+             .diff(room().members[request.auth.uid])
+             .affectedKeys().hasOnly(['ready'])
+          && after().members[request.auth.uid].ready == true
+          && (
+            changed().hasOnly(['members'])
+            || (
+              // Second-ready client also starts the game.
+              changed().hasOnly(['members', 'status', 'currentTurnUid', 'turnEndsAt'])
+              && room().members[otherThan(request.auth.uid)].ready == true
+              && after().status == 'PLAYING'
+              && after().currentTurnUid in room().memberUids
+              && validDeadline()));
+      }
+
+      // Batched with the guess create: flip turn to the opponent.
+      function isGuessFlip() {
+        return isMember()
+          && room().status == 'PLAYING'
+          && request.auth.uid == room().currentTurnUid
+          && request.time < room().turnEndsAt + duration.value(2, 's')
+          && changed().hasOnly(['currentTurnUid', 'turnEndsAt', 'guessCount'])
+          && after().currentTurnUid == otherThan(request.auth.uid)
+          && after().guessCount == room().guessCount + 1
+          && validDeadline();
+      }
+
+      // Batched with a timeout-row create: any member, only after deadline.
+      function isTimeoutFlip() {
+        return isMember()
+          && room().status == 'PLAYING'
+          && request.time >= room().turnEndsAt
+          && changed().hasOnly(['currentTurnUid', 'turnEndsAt', 'guessCount', 'timeoutCount'])
+          && after().currentTurnUid == otherThan(room().currentTurnUid)
+          && after().guessCount == room().guessCount + 1
+          && after().timeoutCount == room().timeoutCount + 1
+          && validDeadline();
+      }
+
+      // Either the scorer finishes the game for the guesser (winnerUid != me),
+      // or the guesser claims a win backed by a scored 4-placed guess doc.
+      function isFinish() {
+        return isMember()
+          && room().status == 'PLAYING'
+          && changed().hasOnly(['status', 'winnerUid', 'winningGuessId',
+                                'currentTurnUid', 'turnEndsAt', 'revealedSecrets'])
+          && after().status == 'FINISHED'
+          && after().winnerUid in room().memberUids
+          && after().winningGuessId is string
+          && after().currentTurnUid == null
+          && after().turnEndsAt == null
+          && (
+            after().winnerUid != request.auth.uid
+            || (
+              get(/databases/$(db)/documents/rooms/$(key)/guesses/$(after().winningGuessId))
+                .data.uid == request.auth.uid
+              && get(/databases/$(db)/documents/rooms/$(key)/guesses/$(after().winningGuessId))
+                .data.placed == 4))
+          && revealSelfOnly();
+      }
+
+      function isReveal() {
+        return isMember()
+          && room().status == 'FINISHED'
+          && changed().hasOnly(['revealedSecrets'])
+          && revealSelfOnly();
+      }
+
+      // revealedSecrets may only gain the caller's own entry, and it must
+      // match the private doc — no fabricated reveals.
+      function revealSelfOnly() {
+        return !changed().hasAny(['revealedSecrets'])
+          || (
+            after().revealedSecrets.diff(room().revealedSecrets).affectedKeys()
+              .hasOnly([request.auth.uid])
+            && after().revealedSecrets[request.auth.uid]
+              == get(/databases/$(db)/documents/rooms/$(key)/private/$(request.auth.uid))
+                 .data.secret);
+      }
+
+      match /guesses/{gid} {
+        function roomData() {
+          return get(/databases/$(db)/documents/rooms/$(key)).data;
+        }
+
+        allow read: if signedIn();
+
+        // Normal guess by the player whose turn it is, or a timeout row by
+        // either member once the deadline passed. gid is seq-derived so a
+        // double submit fails on the existing doc.
+        allow create: if signedIn()
+          && roomData().status == 'PLAYING'
+          && request.resource.data.seq == roomData().guessCount
+          && gid == 'g' + string(request.resource.data.seq)
+          && (
+            (
+              request.auth.uid == roomData().currentTurnUid
+              && request.resource.data.uid == request.auth.uid
+              && request.resource.data.isTimeout == false
+              && request.resource.data.status == 'pending'
+              && request.resource.data.digits == null
+              && request.resource.data.placed == null
+              && request.resource.data.value.matches('^[0-9]{4}$'))
+            || (
+              request.auth.uid in roomData().memberUids
+              && request.time >= roomData().turnEndsAt
+              && request.resource.data.uid == roomData().currentTurnUid
+              && request.resource.data.isTimeout == true
+              && request.resource.data.status == 'scored'
+              && request.resource.data.digits == 0
+              && request.resource.data.placed == 0
+              && request.resource.data.value == ''));
+
+        // Feedback: only the opponent of the guesser, only pending → scored,
+        // only the feedback fields.
+        allow update: if signedIn()
+          && request.auth.uid in roomData().memberUids
+          && request.auth.uid != resource.data.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'scored'
+          && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'digits', 'placed', 'scoredAt'])
+          && request.resource.data.digits is int
+          && request.resource.data.digits >= 0
+          && request.resource.data.digits <= 4
+          && request.resource.data.placed is int
+          && request.resource.data.placed >= 0
+          && request.resource.data.placed <= request.resource.data.digits;
+      }
+
+      match /private/{uid} {
+        function roomData() {
+          return get(/databases/$(db)/documents/rooms/$(key)).data;
+        }
+
+        // The confidentiality boundary: owner-only read, and the secret is
+        // frozen once the game starts (get() sees pre-transaction state, so
+        // the readyUp transaction that flips to PLAYING still passes).
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && request.auth.uid in roomData().memberUids
+          && roomData().status == 'LOBBY'
+          && request.resource.data.secret.matches('^[0-9]{4}$');
+      }
+    }
+  }
+}

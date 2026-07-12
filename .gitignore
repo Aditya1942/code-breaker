@@ -14,12 +14,13 @@ yarn.lock
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# build output
+/dist
 
-# production
-/build
+# firebase
+.firebase/
+*-debug.log
+firestore-debug.log
 
 # misc
 .DS_Store
@@ -35,11 +36,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 

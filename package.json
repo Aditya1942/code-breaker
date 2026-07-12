@@ -2,29 +2,34 @@
   "name": "code-breaker",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run src/lib/game.test.ts",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-code-breaker \"vitest run src/lib/rules.test.ts\"",
+    "emulators": "firebase emulators:start --project demo-code-breaker"
   },
   "dependencies": {
-    "@vercel/functions": "^3.7.5",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.23.0",
-    "next": "16.2.10",
+    "firebase": "^12.9.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-router": "^7.5.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "@tailwindcss/vite": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "@vitejs/plugin-react": "^5.0.0",
+    "firebase-tools": "^15.0.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^7.3.0",
+    "vitest": "^3.2.0"
   }
 }
